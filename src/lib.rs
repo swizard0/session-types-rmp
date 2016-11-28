@@ -5,7 +5,7 @@ extern crate rmp_serde;
 use std::io;
 use std::io::{Read, Write};
 use serde::{Serialize, Deserialize};
-use session_types_ng::{ChannelSend, ChannelRecv, Carrier, HasDual, Chan};
+use session_types_ng::{ChannelSend, ChannelRecv, Carrier};
 
 pub trait RWChannel : Read + Write { }
 impl<T> RWChannel for T where T: Read + Write {}
@@ -65,6 +65,17 @@ impl<T> ChannelRecv for Value<T> where T: Deserialize {
     }
 }
 
+impl Carrier for Channel {
+    type SendChoiceErr = SendError;
+    fn send_choice(&mut self, choice: bool) -> Result<(), Self::SendChoiceErr> {
+        Value(choice).send(self)
+    }
+
+    type RecvChoiceErr = RecvError;
+    fn recv_choice(&mut self) -> Result<bool, Self::RecvChoiceErr> {
+        Value::recv(self).map(|Value(value)| value)
+    }
+}
 
 #[cfg(test)]
 mod tests {
