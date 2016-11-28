@@ -1,0 +1,14 @@
+[package]
+name = "session-types-rmp"
+version = "0.1.0"
+authors = ["Alexey Voznyuk <me@swizard.info>"]
+description = "A generic session types for RW IO channels using rmp-serde"
+repository = "https://github.com/swizard0/session-types-rmp"
+readme = "README.md"
+keywords = ["session", "types", "channels", "io", "rmp", "messagepack", "protocol", "communication"]
+license = "MIT"
+
+[dependencies]
+session-types-ng = { git = "https://github.com/swizard0/session-types-ng" }
+serde = "0.8"
+rmp-serde = "0.10"
