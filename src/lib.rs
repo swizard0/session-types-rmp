@@ -168,9 +168,6 @@ mod tests {
         let acceptor = net::TcpListener::bind("0.0.0.0:51791").unwrap();
         let _th = spawn(move || {
             let slave_stream = net::TcpStream::connect("0.0.0.0:51791").unwrap();
-            slave_stream.set_read_timeout(None).unwrap();
-            slave_stream.set_write_timeout(None).unwrap();
-
             let mut carrier = Channel::new(slave_stream);
             loop {
                 let (next_carrier, shutdown) = server(Chan::new(carrier));
@@ -183,9 +180,6 @@ mod tests {
         });
 
         let master_stream = acceptor.accept().unwrap().0;
-        master_stream.set_read_timeout(None).unwrap();
-        master_stream.set_write_timeout(None).unwrap();
-
         let carrier = Channel::new(master_stream);
         let (carrier, maybe_pos) =
             client(Chan::new(carrier), 3, [-1, 0, 1, 2, 3, 4].iter().cloned());
