@@ -31,6 +31,12 @@ impl<T> Value<T> where T: Serialize + Deserialize {
     }
 }
 
+impl<T> Value<T> {
+    pub fn get(self) -> T {
+        self.0
+    }
+}
+
 #[derive(Debug)]
 pub enum SendError {
     Encode(rmp_serde::encode::Error),
@@ -79,7 +85,122 @@ impl Carrier for Channel {
 
 #[cfg(test)]
 mod tests {
+    use std::net;
+    use std::thread::spawn;
+    use session_types_ng::{Chan, Rec, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
+    use super::{Channel, Value};
+
+    type Proto =
+        Offer<ProtoFind, More<Offer<End, Nil>>>;
+
+    type ProtoFind =
+        Recv<Value<isize>, Rec<ProtoScan>>;
+
+    type ProtoScan =
+        Offer<ProtoScanValue, More<Offer<End, Nil>>>;
+
+    type ProtoScanValue =
+        Recv<Value<isize>, ProtoScanResult>;
+
+    type ProtoScanResult =
+        Choose<Var<Z>, More<Choose<End, Nil>>>;
+
+    type SrvProto = Proto;
+    type CliProto = <SrvProto as HasDual>::Dual;
+
+    fn server(chan: Chan<Channel, (), SrvProto>) -> (Channel, bool) {
+        let chan = match chan.offer().option(Ok).option(Err).unwrap() {
+            Ok(chan_proceed) => chan_proceed,
+            Err(chan_stop) => return (chan_stop.shutdown(), true),
+        };
+        let (chan, vsample) = chan.recv().unwrap();
+        let sample = vsample.get();
+
+        let mut chan = chan.enter();
+        loop {
+            let maybe_next = chan
+                .offer()
+                .option(|chan_value| Ok(chan_value.recv().unwrap()))
+                .option(|chan_stop| Err(chan_stop.shutdown()))
+                .unwrap();
+            match maybe_next {
+                Ok((next_chan, vvalue)) =>
+                    if vvalue.get() == sample {
+                        // found it
+                        return (next_chan.second().unwrap().shutdown(), false);
+                    } else {
+                        // not found
+                        chan = next_chan.first().unwrap().zero();
+                    },
+                Err(carrier) =>
+                    return (carrier, false),
+            }
+        }
+    }
+
+    fn client<I>(chan: Chan<Channel, (), CliProto>, sample: isize, values: I) -> (Channel, Option<usize>)
+        where I: Iterator<Item = isize>
+    {
+        let mut chan = chan
+            .first().unwrap()
+            .send(Value::new(sample)).unwrap()
+            .enter();
+        for (i, value) in values.enumerate() {
+            let maybe_next = chan
+                .first().unwrap()
+                .send(Value::new(value)).unwrap()
+                .offer()
+                .option(|chan_not_found| Err(chan_not_found.zero()))
+                .option(|chan_found| Ok(chan_found.shutdown()))
+                .unwrap();
+            match maybe_next {
+                Ok(carrier) =>
+                    return (carrier, Some(i)),
+                Err(next_chan) =>
+                    chan = next_chan,
+            }
+        }
+        (chan.second().unwrap().shutdown(), None)
+    }
+
     #[test]
-    fn it_works() {
+    fn tcp_comm() {
+        let acceptor = net::TcpListener::bind("0.0.0.0:51791").unwrap();
+        let _th = spawn(move || {
+            let slave_stream = net::TcpStream::connect("0.0.0.0:51791").unwrap();
+            slave_stream.set_read_timeout(None).unwrap();
+            slave_stream.set_write_timeout(None).unwrap();
+
+            let mut carrier = Channel::new(slave_stream);
+            loop {
+                let (next_carrier, shutdown) = server(Chan::new(carrier));
+                if shutdown {
+                    break;
+                } else {
+                    carrier = next_carrier;
+                }
+            }
+        });
+
+        let master_stream = acceptor.accept().unwrap().0;
+        master_stream.set_read_timeout(None).unwrap();
+        master_stream.set_write_timeout(None).unwrap();
+
+        let carrier = Channel::new(master_stream);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 3, [-1, 0, 1, 2, 3, 4].iter().cloned());
+        assert_eq!(maybe_pos, Some(4));
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), -2, [-1, 0, 1, 2, 3, 4].iter().cloned());
+        assert_eq!(maybe_pos, None);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 3, [].iter().cloned());
+        assert_eq!(maybe_pos, None);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 6, [-1, 0, 1, 2, 3, 4, 5, 6, 6, 7].iter().cloned());
+        assert_eq!(maybe_pos, Some(7));
+
+        let chan_to_close: Chan<_, (), CliProto> = Chan::new(carrier);
+        chan_to_close.second().unwrap().close();
     }
 }
