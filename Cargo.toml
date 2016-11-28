@@ -1,6 +1,6 @@
 [package]
 name = "session-types-rmp"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Alexey Voznyuk <me@swizard.info>"]
 description = "A generic session types for RW IO channels using rmp-serde"
 repository = "https://github.com/swizard0/session-types-rmp"
