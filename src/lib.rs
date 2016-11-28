@@ -2,6 +2,7 @@ extern crate session_types_ng;
 extern crate serde;
 extern crate rmp_serde;
 
+use std::io;
 use std::io::{Read, Write};
 use serde::{Serialize, Deserialize};
 use session_types_ng::{ChannelSend, ChannelRecv, Carrier, HasDual, Chan};
@@ -30,24 +31,37 @@ impl<T> Value<T> where T: Serialize + Deserialize {
     }
 }
 
-impl<T> Serialize for Value<T> where T: Serialize {
-    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: serde::ser::Serializer {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<T> Deserialize for Value<T> where T: Deserialize {
-    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error> where D: serde::de::Deserializer {
-        Ok(Value(Deserialize::deserialize(deserializer)?))
-    }
+#[derive(Debug)]
+pub enum SendError {
+    Encode(rmp_serde::encode::Error),
+    Flush(io::Error),
 }
 
 impl<T> ChannelSend for Value<T> where T: Serialize {
     type Crr = Channel;
-    type Err = rmp_serde::encode::Error;
+    type Err = SendError;
 
     fn send(self, carrier: &mut Self::Crr) -> Result<(), Self::Err> {
-        self.serialize(&mut rmp_serde::Serializer::new(&mut carrier.rw))
+        self.0.serialize(&mut rmp_serde::Serializer::new(&mut carrier.rw))
+            .map_err(SendError::Encode)?;
+        carrier.rw.flush()
+            .map_err(SendError::Flush)
+    }
+}
+
+#[derive(Debug)]
+pub enum RecvError {
+    Decode(rmp_serde::decode::Error),
+}
+
+impl<T> ChannelRecv for Value<T> where T: Deserialize {
+    type Crr = Channel;
+    type Err = RecvError;
+
+    fn recv(carrier: &mut Self::Crr) -> Result<Self, Self::Err> {
+        let value = Deserialize::deserialize(&mut rmp_serde::Deserializer::new(&mut carrier.rw))
+            .map_err(RecvError::Decode)?;
+        Ok(Value(value))
     }
 }
 
