@@ -41,6 +41,7 @@ fn search_index<I>(sample: isize, values: I) -> Option<usize>
 
 Suppose we want to design client-server application, where the algorithm above is implemented in server part and all input values for it are provided by clients. All communication between server and client are handled by TCP connection. Let's start:
 
+```
 #!rust
     use std::net;
     use std::thread::spawn;
@@ -48,6 +49,7 @@ Suppose we want to design client-server application, where the algorithm above i
 
 So when a client establishes a connection with server, an interactive session should be created in which both sides should talk with each other using some kind of protocol. Let's encode this session using [session types](https://github.com/swizard0/session-types-ng):
 
+```
 #!rust
     use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
     use session_types_rmp::{Channel, Value};
@@ -79,6 +81,7 @@ So when a client establishes a connection with server, an interactive session sh
 
 Given such kind of protocol schema, we can easily code a server and client implementations:
 
+```
 #!rust
     // This is the server session protocol handler. Upon exit, it returns two values tuple:
     //  * the underlying channel for futher reusing
