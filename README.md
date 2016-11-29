@@ -26,6 +26,7 @@ extern crate session-types-rmp;
 
 Consider the following simple code snippet:
 
+```
 #!rust
 fn search_index<I>(sample: isize, values: I) -> Option<usize>
     where I: Iterator<Item = isize>
