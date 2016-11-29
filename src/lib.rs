@@ -87,7 +87,7 @@ impl Carrier for Channel {
 mod tests {
     use std::net;
     use std::thread::spawn;
-    use session_types_ng::{Chan, Rec, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
+    use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
     use super::{Channel, Value};
 
     // Server initial prompt: either start value searching session or force quit.
@@ -106,9 +106,10 @@ mod tests {
     type ProtoScanValue =
         Recv<Value<isize>, ProtoScanResult>;
 
-    // Comparison result is either fail (continue the loop in this case) or match (break the loop then).
+    // Comparison result is either fail (continue the loop in this case) or match (break the loop then
+    // and return an index of matched value).
     type ProtoScanResult =
-        Choose<Var<Z>, More<Choose<End, Nil>>>;
+        Choose<Var<Z>, More<Choose<Send<Value<usize>, End>, Nil>>>;
 
     type SrvProto = Proto;
     type CliProto = <SrvProto as HasDual>::Dual;
@@ -131,6 +132,7 @@ mod tests {
 
         // Enter the searching loop
         let mut chan = chan.enter();
+        let mut values_count = 0;
         loop {
             let maybe_next = chan
                 .offer()
@@ -143,8 +145,15 @@ mod tests {
                 Ok((next_chan, vvalue)) =>
                     // comparing the value requested with the sample
                     if vvalue.get() == sample {
-                        // found it, notify client about success
-                        return (next_chan.second().unwrap().shutdown(), false);
+                        // found it
+                        let carrier = next_chan
+                            // notify client about success
+                            .second().unwrap()
+                            // send the index of matched value
+                            .send(Value::new(values_count)).unwrap()
+                            // shutdown the channel and extract it's carrier
+                            .shutdown();
+                        return (carrier, false);
                     } else {
                         // not found, notify client about fail and continue the loop
                         chan = next_chan.first().unwrap().zero();
@@ -152,6 +161,7 @@ mod tests {
                 Err(carrier) =>
                     return (carrier, false),
             }
+            values_count += 1;
         }
     }
 
@@ -168,7 +178,7 @@ mod tests {
             .send(Value::new(sample)).unwrap()
             // enter the searching loop
             .enter();
-        for (i, value) in values.enumerate() {
+        for value in values {
             let maybe_next = chan
                 // notify server that there is a value to process
                 .first().unwrap()
@@ -178,12 +188,14 @@ mod tests {
                 // server responds about comparison fail
                 .option(|chan_not_found| Err(chan_not_found.zero()))
                 // server responds about comparison success
-                .option(|chan_found| Ok(chan_found.shutdown()))
+                .option(|chan_found| Ok(chan_found))
                 .unwrap();
             match maybe_next {
-                Ok(carrier) =>
-                    // stop iteration in case of found value
-                    return (carrier, Some(i)),
+                Ok(next_chan) => {
+                    // in case of found value receive it's index and stop iteration
+                    let (next_chan, vindex) = next_chan.recv().unwrap();
+                    return (next_chan.shutdown(), Some(vindex.get()));
+                },
                 Err(next_chan) =>
                     // continue iteration in case of failure
                     chan = next_chan,
