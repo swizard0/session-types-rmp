@@ -90,46 +90,63 @@ mod tests {
     use session_types_ng::{Chan, Rec, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
     use super::{Channel, Value};
 
+    // Server initial prompt: either start value searching session or force quit.
     type Proto =
         Offer<ProtoFind, More<Offer<End, Nil>>>;
 
+    // Receive a sample value to search for and then start searching loop.
     type ProtoFind =
         Recv<Value<isize>, Rec<ProtoScan>>;
 
+    // Perform termination condition check on each loop iteration before receiving a value to compare.
     type ProtoScan =
         Offer<ProtoScanValue, More<Offer<End, Nil>>>;
 
+    // Receive next value to check and then return comparison result.
     type ProtoScanValue =
         Recv<Value<isize>, ProtoScanResult>;
 
+    // Comparison result is either fail (continue the loop in this case) or match (break the loop then).
     type ProtoScanResult =
         Choose<Var<Z>, More<Choose<End, Nil>>>;
 
     type SrvProto = Proto;
     type CliProto = <SrvProto as HasDual>::Dual;
 
+    // This is the server session protocol handler. Upon exit, it returns two values tuple:
+    //  * the underlying channel for futher reusing
+    //  * a flag indicating whether client requests a force quit
     fn server(chan: Chan<Channel, (), SrvProto>) -> (Channel, bool) {
+        // Process start protocol prompt
         let chan = match chan.offer().option(Ok).option(Err).unwrap() {
+            // proceeding with value searching
             Ok(chan_proceed) => chan_proceed,
+            // stopping the server
             Err(chan_stop) => return (chan_stop.shutdown(), true),
         };
+
+        // Receive a sample value to search
         let (chan, vsample) = chan.recv().unwrap();
         let sample = vsample.get();
 
+        // Enter the searching loop
         let mut chan = chan.enter();
         loop {
             let maybe_next = chan
                 .offer()
+                // client sends a value to compare
                 .option(|chan_value| Ok(chan_value.recv().unwrap()))
+                // client requests loop break
                 .option(|chan_stop| Err(chan_stop.shutdown()))
                 .unwrap();
             match maybe_next {
                 Ok((next_chan, vvalue)) =>
+                    // comparing the value requested with the sample
                     if vvalue.get() == sample {
-                        // found it
+                        // found it, notify client about success
                         return (next_chan.second().unwrap().shutdown(), false);
                     } else {
-                        // not found
+                        // not found, notify client about fail and continue the loop
                         chan = next_chan.first().unwrap().zero();
                     },
                 Err(carrier) =>
@@ -138,28 +155,41 @@ mod tests {
         }
     }
 
+    // This is the client session protocol handler. Upon exit, it returns two values tuple:
+    //  * the underlying channel for futher reusing
+    //  * a possible value number that matched the sample provided
     fn client<I>(chan: Chan<Channel, (), CliProto>, sample: isize, values: I) -> (Channel, Option<usize>)
         where I: Iterator<Item = isize>
     {
         let mut chan = chan
+            // choose the searching session
             .first().unwrap()
+            // install sample value to search for
             .send(Value::new(sample)).unwrap()
+            // enter the searching loop
             .enter();
         for (i, value) in values.enumerate() {
             let maybe_next = chan
+                // notify server that there is a value to process
                 .first().unwrap()
+                // send the value
                 .send(Value::new(value)).unwrap()
                 .offer()
+                // server responds about comparison fail
                 .option(|chan_not_found| Err(chan_not_found.zero()))
+                // server responds about comparison success
                 .option(|chan_found| Ok(chan_found.shutdown()))
                 .unwrap();
             match maybe_next {
                 Ok(carrier) =>
+                    // stop iteration in case of found value
                     return (carrier, Some(i)),
                 Err(next_chan) =>
+                    // continue iteration in case of failure
                     chan = next_chan,
             }
         }
+        // no more items: notify server about it and shutdown the channel
         (chan.second().unwrap().shutdown(), None)
     }
 
@@ -167,6 +197,8 @@ mod tests {
     fn tcp_comm() {
         let acceptor = net::TcpListener::bind("0.0.0.0:51791").unwrap();
         let _th = spawn(move || {
+            // Background server thread: repeat the protocol session until
+            // `server` function returns true.
             let slave_stream = net::TcpStream::connect("0.0.0.0:51791").unwrap();
             let mut carrier = Channel::new(slave_stream);
             loop {
@@ -179,6 +211,8 @@ mod tests {
             }
         });
 
+        // Client requests: reuse the same underlying carrier
+        // several times for various client protocol sessions.
         let master_stream = acceptor.accept().unwrap().0;
         let carrier = Channel::new(master_stream);
         let (carrier, maybe_pos) =
@@ -194,7 +228,9 @@ mod tests {
             client(Chan::new(carrier), 6, [-1, 0, 1, 2, 3, 4, 5, 6, 6, 7].iter().cloned());
         assert_eq!(maybe_pos, Some(7));
 
-        let chan_to_close: Chan<_, (), CliProto> = Chan::new(carrier);
-        chan_to_close.second().unwrap().close();
+        // Request server shutdown
+        Chan::<_, (), CliProto>::new(carrier)
+            .second().unwrap()
+            .close();
     }
 }
