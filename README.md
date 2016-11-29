@@ -76,7 +76,7 @@ So when a client establishes a connection with server, an interactive session sh
     type CliProto = <SrvProto as HasDual>::Dual;
 ```
 
-Given such kind of protocol schema, we can easily code a server and client implementations:
+Given such kind of protocol schema, we can easily write a server and client implementations:
 
 ```rust
     // This is the server session protocol handler. Upon exit, it returns two values tuple:
@@ -170,4 +170,48 @@ Given such kind of protocol schema, we can easily code a server and client imple
         (chan.second().unwrap().shutdown(), None)
     }
 
+```
+
+Note that there is almost impossible to write some code in these implementations which could violate our protocol schema in runtime: it will not be compiled (thanks to session types here). What we are missing is the following simple code example which connects server and client via `net::TcpStream`:
+
+```rust
+    fn tcp_comm() {
+        let acceptor = net::TcpListener::bind("0.0.0.0:51791").unwrap();
+        let _th = spawn(move || {
+            // Background server thread: repeat the protocol session until
+            // `server` function returns true.
+            let slave_stream = net::TcpStream::connect("0.0.0.0:51791").unwrap();
+            let mut carrier = Channel::new(slave_stream);
+            loop {
+                let (next_carrier, shutdown) = server(Chan::new(carrier));
+                if shutdown {
+                    break;
+                } else {
+                    carrier = next_carrier;
+                }
+            }
+        });
+
+        // Client requests: reuse the same underlying carrier
+        // several times for various client protocol sessions.
+        let master_stream = acceptor.accept().unwrap().0;
+        let carrier = Channel::new(master_stream);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 3, [-1, 0, 1, 2, 3, 4].iter().cloned());
+        assert_eq!(maybe_pos, Some(4));
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), -2, [-1, 0, 1, 2, 3, 4].iter().cloned());
+        assert_eq!(maybe_pos, None);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 3, [].iter().cloned());
+        assert_eq!(maybe_pos, None);
+        let (carrier, maybe_pos) =
+            client(Chan::new(carrier), 6, [-1, 0, 1, 2, 3, 4, 5, 6, 6, 7].iter().cloned());
+        assert_eq!(maybe_pos, Some(7));
+
+        // Request server shutdown
+        Chan::<_, (), CliProto>::new(carrier)
+            .second().unwrap()
+            .close();
+    }
 ```
