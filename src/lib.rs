@@ -87,12 +87,12 @@ impl Carrier for Channel {
 mod tests {
     use std::net;
     use std::thread::spawn;
-    use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
+    use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, Nil, End, Var, Z, HasDual};
     use super::{Channel, Value};
 
     // Server initial prompt: either start value searching session or force quit.
     type Proto =
-        Offer<ProtoFind, More<Offer<End, Nil>>>;
+        Offer<ProtoFind, Offer<End, Nil>>;
 
     // Receive a sample value to search for and then start searching loop.
     type ProtoFind =
@@ -100,7 +100,7 @@ mod tests {
 
     // Perform termination condition check on each loop iteration before receiving a value to compare.
     type ProtoScan =
-        Offer<ProtoScanValue, More<Offer<End, Nil>>>;
+        Offer<ProtoScanValue, Offer<End, Nil>>;
 
     // Receive next value to check and then return comparison result.
     type ProtoScanValue =
@@ -109,7 +109,7 @@ mod tests {
     // Comparison result is either fail (continue the loop in this case) or match (break the loop then
     // and return an index of matched value).
     type ProtoScanResult =
-        Choose<Var<Z>, More<Choose<Send<Value<usize>, End>, Nil>>>;
+        Choose<Var<Z>, Choose<Send<Value<usize>, End>, Nil>>;
 
     type SrvProto = Proto;
     type CliProto = <SrvProto as HasDual>::Dual;

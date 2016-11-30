@@ -48,12 +48,12 @@ Suppose we want to design client-server application, where the algorithm above i
 So when a client establishes a connection with server, an interactive session should be created in which both sides should talk with each other using some kind of protocol. Let's encode this session using [session types](https://github.com/swizard0/session-types-ng):
 
 ```rust
-    use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, More, Nil, End, Var, Z, HasDual};
+    use session_types_ng::{Chan, Rec, Send, Recv, Choose, Offer, Nil, End, Var, Z, HasDual};
     use session_types_rmp::{Channel, Value};
 
     // Server initial prompt: either start value searching session or force quit.
     type Proto =
-        Offer<ProtoFind, More<Offer<End, Nil>>>;
+        Offer<ProtoFind, Offer<End, Nil>>;
 
     // Receive a sample value to search for and then start searching loop.
     type ProtoFind =
@@ -61,7 +61,7 @@ So when a client establishes a connection with server, an interactive session sh
 
     // Perform termination condition check on each loop iteration before receiving a value to compare.
     type ProtoScan =
-        Offer<ProtoScanValue, More<Offer<End, Nil>>>;
+        Offer<ProtoScanValue, Offer<End, Nil>>;
 
     // Receive next value to check and then return comparison result.
     type ProtoScanValue =
@@ -70,7 +70,7 @@ So when a client establishes a connection with server, an interactive session sh
     // Comparison result is either fail (continue the loop in this case) or match (break the loop then
     // and return an index of matched value).
     type ProtoScanResult =
-        Choose<Var<Z>, More<Choose<Send<Value<usize>, End>, Nil>>>;
+        Choose<Var<Z>, Choose<Send<Value<usize>, End>, Nil>>;
 
     type SrvProto = Proto;
     type CliProto = <SrvProto as HasDual>::Dual;
@@ -172,7 +172,7 @@ Given such kind of protocol schema, we can easily write a server and client impl
 
 ```
 
-Note that there is almost impossible to write some code in these implementations which could violate our protocol schema in runtime: it will not be compiled (thanks to session types here). What we are missing is the following simple code example which connects server and client via `net::TcpStream`:
+Note that there is almost impossible to write any code inside these implementations which could violate our protocol schema in runtime: it will not be compiled (thanks to session types here). What we are missing is the following simple code example which connects server and client via `net::TcpStream`:
 
 ```rust
     fn tcp_comm() {
